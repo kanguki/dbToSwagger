@@ -5,7 +5,7 @@ import (
 	"flag"
 	"os"
 
-	"github.com/techx-mo/techxOpenApiToSwagger/openApi"
+	"github.com/techx-mo/dbToSwagger/openApi"
 )
 
 func main() {

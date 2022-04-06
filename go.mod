@@ -1,4 +1,4 @@
-module github.com/techx-mo/techxOpenApiToSwagger
+module github.com/techx-mo/dbToSwagger
 
 go 1.16
 
