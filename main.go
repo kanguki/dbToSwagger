@@ -26,8 +26,9 @@ func main() {
 		WorkerCount:  8,
 		JobPerWorker: 1,
 	}
+	clientId, domain := os.Getenv("CLIENT_ID"), os.Getenv("DOMAIN")
 	data := converter.GetData(openApi.Options{
-		DBOptions: openApi.DBOptions{ClientId: "kis-wts", Domain: "kis"},
+		DBOptions: openApi.DBOptions{ClientId: clientId, Domain: domain},
 	})
 	out := converter.AssignJobs(data)
 	// if len(out) == 0 {

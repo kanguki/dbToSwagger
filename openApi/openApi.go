@@ -117,6 +117,7 @@ func (c *TTLOpenApiConverter) convert(data RawData) Output {
 	if data.security != "" && data.security != "[]" {
 		body += fmt.Sprintf(`"security":[{"Bearer": []}],`)
 	}
+	data.tags = strings.ReplaceAll(data.tags, "Mas-rest-bridge", "Ttl-based")
 	body += fmt.Sprintf(`"summary":%v, "tags":%v, "responses": %v`, strings.TrimPrefix(data.summary, "MAS_"), data.tags, data.responses)
 	uri_method := strings.Split(data.uriPattern, ":")
 	body = fmt.Sprintf(`{%v}`, body)
