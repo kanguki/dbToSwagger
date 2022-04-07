@@ -3,12 +3,13 @@ package openApi
 import (
 	"database/sql"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
 	"regexp"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 type Db interface {
-	Read(chan RawData, DBOptions) error
+	Read(chan RawData, DBOptions)
 }
 type DBOptions struct {
 	ClientId, Domain string
@@ -22,10 +23,11 @@ type OpenApiDb struct {
 	Conn *sql.DB
 }
 
-func (d *OpenApiDb) Read(data chan RawData, opts DBOptions) error {
-	defer close(data)
+func (d *OpenApiDb) Read(data chan RawData, opts DBOptions) {
 	if hasSuspiciousCharacter(opts.ClientId) || hasSuspiciousCharacter(opts.Domain) {
-		return fmt.Errorf("input is suspicious: %+v", opts)
+		Log("input is suspicious: %+v", opts)
+		close(data)
+		return
 	}
 	query := fmt.Sprintf(`
 select o.operation_id, o.tags, o.uri_pattern, o.summary, o.security, o.parameters, o.request_body, o.responses, o.version from 
@@ -39,29 +41,35 @@ join t_client c on c.id = clm.client_id
 where c.client_id = "%v" and c.domain = "%v"; `, opts.ClientId, opts.Domain)
 	rawData, err := d.Conn.Query(query)
 	if err != nil {
-		return fmt.Errorf("error reading from db: %v", err)
+		Log("error reading from db: %v", err)
+		close(data)
+		return
 	}
-	for rawData.Next() {
-
-		var name, tags, uriPattern, summary, security, parameters, requestBody, responses, version sql.NullString
-		err := rawData.Scan(&name, &tags, &uriPattern, &summary, &security, &parameters, &requestBody, &responses, &version)
-		if err != nil {
-			return fmt.Errorf("error reading from db: %v", err)
+	go func() {
+		defer close(data)
+		for rawData.Next() {
+			var name, tags, uriPattern, summary, security, parameters, requestBody, responses, version sql.NullString
+			err := rawData.Scan(&name, &tags, &uriPattern, &summary, &security, &parameters, &requestBody, &responses, &version)
+			if err != nil {
+				Log("error reading from db: %v", err)
+				return
+			}
+			r := RawData{
+				name:        name.String,
+				tags:        tags.String,
+				uriPattern:  uriPattern.String,
+				summary:     summary.String,
+				security:    security.String,
+				parameters:  parameters.String,
+				requestBody: requestBody.String,
+				responses:   responses.String,
+				version:     version.String,
+			}
+			Debug("%v", r)
+			data <- r
 		}
-		data <- RawData{
-			name:        name.String,
-			tags:        tags.String,
-			uriPattern:  uriPattern.String,
-			summary:     summary.String,
-			security:    security.String,
-			parameters:  parameters.String,
-			requestBody: requestBody.String,
-			responses:   responses.String,
-			version:     version.String,
-		}
-
-	}
-	return nil
+		Debug("total records: %v", len(data))
+	}()
 }
 
 func hasSuspiciousCharacter(s string) bool {
