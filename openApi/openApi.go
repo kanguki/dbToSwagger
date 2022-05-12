@@ -1,11 +1,95 @@
 package openApi
 
 import (
+	"database/sql"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
 )
+
+var TokenType = map[string]string{"jwt": "jwt", "otpToken": "otpToken"}
+
+func Do() string {
+	conn, err := sql.Open("mysql", os.Getenv("DB_PATH"))
+	if err != nil {
+		Log("error connecting db: %v", err)
+		return ""
+	}
+	Log("Successfully connected mysql")
+	defer conn.Close()
+	var db Db = &OpenApiDb{Conn: conn}
+	var converter OpenApiConverter = &TTLOpenApiConverter{
+		Db:           db,
+		WorkerCount:  8,
+		JobPerWorker: 1,
+	}
+	clientId, domain := os.Getenv("CLIENT_ID"), os.Getenv("DOMAIN")
+	data := converter.GetData(Options{
+		DBOptions: DBOptions{ClientId: clientId, Domain: domain},
+	})
+	out := converter.AssignJobs(data)
+	// if len(out) == 0 {
+	// 	Log("Got no records")
+	// 	return
+	// }
+	m := make(map[string]map[string]string) //[uri][[methods]]
+	for v := range out {
+		if v.Uri == "" || v.Method == "" { //got error
+			continue
+		}
+		uri, method, content := v.Uri, v.Method, v.Content
+		if m[uri] == nil {
+			m[uri] = make(map[string]string)
+		}
+		m[uri][method] = content
+
+	}
+	swaggerPaths := []string{}
+	for k, v := range m {
+		methodContent := []string{}
+		for method, content := range v {
+			methodContent = append(methodContent, fmt.Sprintf(`"%v": %v`, method, content))
+		}
+		swaggerPaths = append(swaggerPaths, fmt.Sprintf(`
+		"%v": {
+			%v
+		}
+		`, k, strings.Join(methodContent, ",")))
+	}
+	swaggerFull := fmt.Sprintf(`
+	{
+		"openapi": "3.0.0",
+		"info": {
+		  "title": "KIS API Specification",
+		  "version": "1.0.0"
+		},
+		"servers": [
+		  {
+		    "url": "https://beta.kisvn.vn:8443/rest",
+		    "description": "KIS API Server"
+		  }
+		],
+		"components": {
+			"securitySchemes": {
+			  "%v": {
+			    "type": "apiKey",
+			    "in": "header",
+			    "name": "authorization",
+			  },
+			  "%v": {
+			    "type": "apiKey",
+			    "in": "header",
+			    "name": "otpToken",
+			  }
+			}
+		             },
+		"paths": {%v}
+	}
+	`, TokenType["jwt"], TokenType["otpToken"], strings.Join(swaggerPaths, ",")) //slice out last ,
+	return swaggerFull
+}
 
 type OpenApiConverter interface {
 	GetData(Options) <-chan RawData
@@ -115,7 +199,11 @@ func (c *TTLOpenApiConverter) convert(data RawData) Output {
 		body += fmt.Sprintf(`"requestBody":%v,`, data.requestBody)
 	}
 	if data.security != "" && data.security != "[]" {
-		body += fmt.Sprintf(`"security":[{"Bearer": []}],`)
+		if strings.Contains(data.forward_data, `"tokenType": "VERIFIED"`) {
+			body += fmt.Sprintf(`"security":[{"%v": []},{"%v": []}],`, TokenType["jwt"], TokenType["otpToken"])
+		} else {
+			body += fmt.Sprintf(`"security":[{"%v": []}],`, TokenType["jwt"])
+		}
 	}
 	data.tags = strings.ReplaceAll(data.tags, "Mas-rest-bridge", "Ttl-based")
 	body += fmt.Sprintf(`"summary":"%v", "tags":%v, "responses": %v`, strings.TrimPrefix(data.summary, "MAS_"), data.tags, data.responses)
